@@ -4,7 +4,7 @@
 ;;; INTERPRETATION OF COMPUTER PROGRAMS (2nd edition)
 ;;;
 ;;; Modified and commented by Carl Offner, 10/21/98 -- 10/12/04
-;;; Modified and commented by Philip DiSarro, 09/04/2019 -- 1/1/2022
+;;; Modified and commented by Philip DiSarro (colll78), 09/04/2019 -- 1/1/2022
 ;;;
 ;;; This code is the code for the metacircular evaluator as it appears
 ;;; in sections 4.1.1-4.1.4 of the book SICP (Structure and interpretation of Computer Programs), with the following
