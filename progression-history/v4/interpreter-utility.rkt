@@ -11,608 +11,322 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; The heap data-structure
-(provide
-  (struct-out eff)
-  handle?
-  heap?
-  heapof?
-  heap-put
-  heap-get
-  heap->list
-  heap-fold
-  handle
-  effof?
-  heap-data
-  parse-handle
-  heap-filter)
+#lang errortrace racket
+#|
+    ===> PLEASE DO NOT DISTRIBUTE THE SOLUTIONS PUBLICLY <===
 
-(struct handle (id) #:transparent #:guard
-  (lambda (id name)
-    (unless (exact-nonnegative-integer? id)
-      (error "handle: id: expecting non-negative integer, got:" id))
-    id))
+   We ask that solutions be distributed only locally -- on paper, on a
+   password-protected webpage, etc.
 
-(struct heap (data) #:transparent)
+   Students are required to adhere to the University Policy on Academic
+   Standards and Cheating, to the University Statement on Plagiarism and the
+   Documentation of Written Work, and to the Code of Student Conduct as
+   delineated in the catalog of Undergraduate Programs. The Code is available
+   online at:
 
-(define (heapof? value?)
-  (struct/c heap (hash/c handle? value? #:immutable #t)))
+   https://www.umb.edu/life_on_campus/dean_of_students/student_conduct
 
-(struct eff (state result) #:transparent)
-(define (effof? state? result?)
-  (struct/c eff state? result?))
-
-(define empty-heap (heap (hash)))
-(define/contract (heap-alloc h v)
-  (-> (heapof? any/c) any/c eff?)
-  (define data (heap-data h))
-  (define new-id (handle (hash-count data)))
-  (define new-heap (heap (hash-set data new-id v)))
-  (eff new-heap new-id))
-(define/contract (heap-get h k)
-  (-> (heapof? any/c) handle? any/c)
-  (hash-ref (heap-data h) k))
-(define/contract (heap-put h k v)
-  (-> (heapof? any/c) handle? any/c heap?)
-  (define data (heap-data h))
-  (cond
-    [(hash-has-key? data k) (heap (hash-set data k v))]
-    [else (error "Unknown handle!")]))
-(define (nonempty-heapof? value?)
-  (and/c (heapof? value?)
-    (flat-named-contract 'nonempty
-      (lambda (x) (> (hash-count (heap-data x)) 0)))))
-
-(define/contract (heap->list hp)
-  (-> heap? (listof (cons/c handle? any/c)))
-  (hash->list (heap-data hp)))
-
-(define/contract (heap-fold proc init hp)
-  (->
-    ; (key val accum) -> accum
-    (-> handle? any/c any/c any/c)
-    any/c ; accum
-    heap?
-    any/c)
-  (define (on-elem elem accum)
-    (proc (car elem) (cdr elem) accum))
-  (foldl on-elem init (heap->list hp)))
-
-(module+ test
-  (require rackunit)
-  (test-case
-    "heap-fold example"
-    (define (heap-keys:1 h) (map car (heap->list h)))
-    (define (heap-keys:2 h) (reverse (heap-fold (lambda (k v accum) (cons k accum)) (list) h)))
-    (define m
-      (parse-mem
-        '([E0 . ([x . 3] [y . 5])]
-          [E1 . (E0 [x . 7] [z . 6])]
-          [E2 . (E0 [m . 1] [y . 2])])))
-    (check-equal? (heap-keys:1 m) (heap-keys:2 m))))
-
-
-(define/contract (heap-filter proc hp)
-  (->
-    ; for each key val returns a boolean
-    (-> handle? any/c boolean?)
-    ; Given a heap
-    heap?
-    ; Returns a heap
-    heap?)
-  (heap
-    (make-immutable-hash
-      (filter
-        (lambda (pair) (proc (car pair) (cdr pair)))
-        (hash->list (heap-data hp))))))
-
-(module+ test
-  (require rackunit)
-  (test-case
-    "Simple"
-    (define h1 empty-heap)          ; h is an empty heap
-    (define r (heap-alloc h1 "foo")) ; stores "foo" in a new memory cell
-    (define h2 (eff-state r))
-    (define x (eff-result r)) ;
-    (check-equal? "foo" (heap-get h2 x)) ; checks that "foo" is in x
-    (define h3 (heap-put h2 x "bar"))    ; stores "bar" in x
-    (check-equal? "bar" (heap-get h3 x)))) ; checks that "bar" is in x
-
-(module+ test
-  (test-case
-    "Unique"
-    (define h1 empty-heap)          ; h is an empty heap
-    (define r1 (heap-alloc h1 "foo")) ; stores "foo" in a new memory cell
-    (define h2 (eff-state r1))
-    (define x (eff-result r1))
-    (define r2 (heap-alloc h2 "bar")) ; stores "foo" in a new memory cell
-    (define h3 (eff-state r2))
-    (define y (eff-result r2))
-    (check-not-equal? x y)  ; Ensures that x != y
-    (check-equal? "foo" (heap-get h3 x))
-    (check-equal? "bar" (heap-get h3 y))))
-
-
+|#
+(require rackunit)
+(require "hw7-util.rkt")
+(require "hw7.rkt")
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Testing API
 
-(provide
-  (struct-out d:void)
-  (struct-out d:apply)
-  (struct-out d:lambda)
-  (struct-out d:number)
-  (struct-out d:closure)
-  (struct-out d:variable)
-  (struct-out d:define)
-  (struct-out d:seq)
-  d:value?
-  d:expression?
-  d:term?)
+(define-check (check-eff? r expected-out-val expected-out-mem)
+  (define given-out-val (d:quote1 (eff-result r)))
+  (define given-out-mem (quote-mem (eff-state r)))
+  (with-check-info (['expected-out-value expected-out-val]
+                    ['given-out-value given-out-val]
+                    ['params null])
+    (unless (equal? given-out-val expected-out-val)
+      (fail)))
+  (with-check-info (['expected-out-mem expected-out-mem]
+                    ['given-out-mem given-out-mem]
+                    ['params null])
+    (unless (equal? given-out-mem expected-out-mem)
+      (fail))))
 
-;; Values
-(define (d:value? v)
-  (or (d:number? v)
-      (d:void? v)
-      (d:closure? v)))
-(struct d:void () #:transparent)
-(struct d:number (value) #:transparent)
-(struct d:closure (env decl) #:transparent)
-;; Expressions
-(define (d:expression? e)
-  (or (d:value? e)
-      (d:variable? e)
-      (d:apply? e)
-      (d:lambda? e)))
-(struct d:lambda (params body) #:transparent)
-(struct d:variable (name) #:transparent)
-(struct d:apply (func args) #:transparent)
-;; Terms
-(define (d:term? t)
-  (or (d:expression? t)
-      (d:define? t)
-      (d:seq? t)))
-(struct d:define (var body) #:transparent)
-(struct d:seq (fst snd) #:transparent)
+(define-check (check-eff-run? given-in-mem op expected-out-val expected-out-mem)
+  (check-eff? (eff-run op given-in-mem) expected-out-val expected-out-mem))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Serializing an AST into a datum
-(provide d:quote1 d:quote quote-handle handle-id)
+(define-check (eval-exp*? mem env exp expected-val expected-mem)
+  (check-eff-run?
+    (parse-mem mem)
+    (d:eval-exp (parse-handle env) (d:parse1 exp))
+    expected-val
+    expected-mem))
 
-;; Quotes a sequence of terms
-(define/contract (d:quote term)
-  (-> d:term? list?)
-  (cond [(d:seq? term) (append (d:quote (d:seq-fst term)) (d:quote (d:seq-snd term)))]
-        [else (list (d:quote1 term))]))
+(define-check (eval-term*? mem env term expected-val expected-mem)
+  (check-eff-run?
+    (parse-mem mem)
+    (d:eval-term (parse-handle env) (d:parse term))
+    expected-val
+    expected-mem))
 
-(define/contract (quote-handle h)
-  (-> handle? symbol?)
-  (string->symbol (format "E~a" (handle-id h))))
-
-;; Quote one term
-(define/contract (d:quote1 term)
-  (-> d:term? any/c)
-  (define (on-lam lam)
-    (define params (map d:variable-name (d:lambda-params lam)))
-    (cons 'lambda (cons params (d:quote (d:lambda-body lam)))))
-  (define (on-app term)
-    (cons (d:quote1 (d:apply-func term)) (map d:quote1 (d:apply-args term))))
-  (define (on-def term)
-    (define var (d:quote1 (d:define-var term)))
-    (cond [(not (d:lambda? (d:define-body term))) (list 'define var (d:quote1 (d:define-body term)))]
-          [else
-            (define lam (d:define-body term))
-            (define args
-              (cons var
-                (map d:variable-name (d:lambda-params lam))))
-            (cons 'define (cons args (d:quote (d:lambda-body lam))))]))
-  (define (on-clos term)
-    (list 'closure (quote-handle (d:closure-env term)) (on-lam (d:closure-decl term))))
-  (cond
-    [(d:lambda? term) (on-lam term)]
-    [(d:apply? term) (on-app term)]
-    [(d:number? term) (d:number-value term)]
-    [(d:variable? term) (d:variable-name term)]
-    [(d:define? term) (on-def term)]
-    [(d:closure? term) (on-clos term)]
-    [(d:void? term) (list 'void)]
-    [else (error "Unsupported term: " term)]))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Parsing a datum into an AST
-(provide d:parse1 d:parse)
-
-(define (lambda? node)
-  (and
-    (list? node)
-    (>= (length node) 3)
-    (equal? 'lambda (first node))
-    (list? (lambda-params node))
-    (andmap symbol? (lambda-params node))))
-(define lambda-params cadr)
-(define lambda-body cddr)
-
-(define (apply? l)
-  (and (list? l) (>= (length l) 1)))
-(define apply-func car)
-(define apply-args cdr)
-
-(define (define-basic? node)
-  (and
-    (list? node)
-    (= (length node) 3)
-    (equal? 'define (car node))
-    (symbol? (define-head node))))
-
-(define (define-func? node)
-  (and
-    (list? node)
-    (>= (length node) 3)
-    (equal? 'define (car node))
-    (list? (define-head node))
-    (andmap symbol? (define-head node))
-    (>= (length (define-head node)) 1)))
-
-(define (define? node)
-  (or
-    (define-basic? node)
-    (define-func? node)))
-
-(define define-head cadr)
-(define define-body cddr)
-
-(define (void? node)
-  (and
-    (list? node)
-    (= (length node) 1)
-    (equal? 'void (first node))))
-
-(define (closure? node)
-  ; (closure env decl)
-  (and
-    (list? node)
-    (= (length node) 3)
-    (equal? 'closure (first node))))
-
-(define (d:parse node)
-  (define (on-elem datum accum)
-    (define elem (d:parse1 datum))
-    (cond [(null? accum) elem]
-          [else (d:seq elem accum)]))
-  (define result (foldr on-elem null node))
-  (when (null? result)
-    (error "A list with 1 or more terms, but got:" node))
-  result)
-
-(define/contract (parse-handle node)
-  (-> symbol? handle?)
-  (handle (string->number (substring (symbol->string node) 1))))
-
-(define (d:parse1 node)
-  (define (build-lambda args body)
-    (define (on-elem datum accum)
-      (define elem (d:parse1 datum))
-      (cond [(d:void? accum) elem]
-            [else (d:seq elem accum)]))
-    (d:lambda (map d:variable args) (foldr on-elem (d:void) body)))
-
-  (define (make-define-func node)
-    (d:define
-      (d:variable (first (define-head node)))
-      (build-lambda (rest (define-head node)) (define-body node))))
-
-  (define (make-define-expr node)
-    (d:define
-      (d:variable (define-head node))
-      (d:parse1 (first (define-body node)))))
-
-  (define (make-lambda node)
-    (build-lambda (lambda-params node) (lambda-body node)))
-
-  (define (make-apply node)
-    (d:apply (d:parse1 (first node)) (map d:parse1 (rest node))))
-
-  (define (make-closure node)
-    (d:closure (parse-handle (second node)) (d:parse1 (third node))))
-
-  (cond
-    [(define-basic? node) (make-define-expr node)]
-    [(define-func? node) (make-define-func node)]
-    [(symbol? node) (d:variable node)]
-    [(real? node) (d:number node)]
-    [(lambda? node) (make-lambda node)]
-    [(closure? node) (make-closure node)]
-    [(void? node) (d:void)]
-    [else (make-apply node)]))
-
-(define (quote-hash map quote-key quote-val lt?)
-  (define (for-each k v)
-    (cons (quote-key k) (quote-val v)))
-  (define (<? x y)
-    (lt? (car x) (car y)))
-  (sort (hash-map map for-each) <?))
-
-(define (parse-hash node parse-key parse-val)
-  (define (for-each pair)
-    (cons (parse-key (car pair)) (parse-val (cdr pair))))
-  (make-immutable-hash (map for-each node)))
-
-(module+ test
-  (require rackunit)
-  (define (check-parses1? exp)
-    (check-equal? (d:quote1 (d:parse1 exp)) exp))
-  (define (check-parses? term)
-    (check-equal? (d:quote (d:parse term)) term))
-
-  (check-equal? (d:parse1 '(lambda () x y)) (d:lambda (list) (d:seq (d:variable 'x) (d:variable 'y))))
-  (check-equal? (d:parse1 '(lambda () x)) (d:lambda (list) (d:variable 'x)))
-  (check-equal? (d:parse1 '(lambda () z y x)) (d:lambda (list) (d:seq (d:variable 'z) (d:seq (d:variable 'y) (d:variable 'x)))))
-  (check-equal? (d:quote1 (d:lambda (list) (d:variable 'x))) '(lambda () x))
-  (check-parses1? '(lambda () x y))
-  (check-parses1? '(lambda () x))
-  (check-parses1? '(lambda () x y z))
-  (check-parses? '((define x 10) (define (f x) 10) (lambda () x y z)))
-  (check-parses1? '(closure E1 (lambda (x) x))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Frames
-(provide
-  parse-frame
-  quote-frame
-  frame-put
-  root-frame
-  frame-get
-  frame-push
-  frame-fold
-  frame-values
-  (struct-out frame))
-
-(struct frame (parent locals) #:transparent)
-(define root-frame (frame #f (hash)))
-(define (frame-push parent var val)
-  (frame parent (hash var val)))
-(define/contract (frame-put frm var val)
-  (-> frame? d:variable? d:value? frame?)
-  (frame (frame-parent frm) (hash-set (frame-locals frm) var val)))
-(define/contract (frame-get frm var)
-  (-> frame? d:variable? (or/c d:value? #f))
-  (hash-ref (frame-locals frm) var #f))
-(define/contract (frame-fold proc init frm)
-  (-> (-> d:variable? d:value? any/c any/c) any/c frame? any/c)
-  (foldl (lambda (pair accum) (proc (car pair) (cdr pair) accum)) init (hash->list (frame-locals frm))))
-(define/contract (frame-values frm)
-  (-> frame? (listof d:value?))
-  (map cdr (hash->list (frame-locals frm))))
-
-(define/contract (quote-frame frm)
-  (-> frame? list?)
-  (define hdl (cond [(frame-parent frm) (quote-handle (frame-parent frm))] [else #f]))
-  (define elems (quote-hash (frame-locals frm) d:quote1 d:quote1 symbol<?))
-  (if hdl (cons hdl elems) elems))
-
-(define/contract (parse-frame node)
-  (-> list? frame?)
-  (define (on-handle node)
-    (cond [(boolean? node) node]
-          [else (parse-handle node)]))
-  (define hd (if (or (empty? node) (pair? (first node))) #f (first node)))
-  (define elems (if hd (rest node) node))
-  (frame (on-handle hd) (parse-hash elems d:parse1 d:parse1)))
-
-(module+ test
-  (require rackunit)
-  (define (check-parses-frame? frm)
-    (define parsed (parse-frame frm))
-    (define given (quote-frame parsed))
-    (check-equal? given frm)
-    (check-equal? (parse-frame given) parsed))
-  (check-parses-frame? '(E1))
-  (check-parses-frame? '())
-  (check-parses-frame? '([x . 3] [y . 2]))
-  (check-parses-frame? '(E2 [x . 3] [y . 2]))
-  ;; Slide 1
-  ; (closure E0 (lambda (y) a)
-  (define c (d:closure (handle 0) (d:lambda (list (d:variable 'y)) (d:variable 'a))))
-  ;E0: [
-  ;  (a . 20)
-  ;  (b . (closure E0 (lambda (y) a)))
-  ;]
-  (define f1
-    (frame-put
-      (frame-put root-frame (d:variable 'a) (d:number 10))
-      (d:variable 'b) c))
-  (check-equal? f1 (frame #f (hash (d:variable 'a) (d:number 10) (d:variable 'b) c)))
-  ; Lookup a
-  (check-equal? (d:number 10) (frame-get f1 (d:variable 'a)))
-  ; Lookup b
-  (check-equal? c (frame-get f1 (d:variable 'b)))
-  ; Lookup c that does not exist
-  (check-equal? #f (frame-get f1 (d:variable 'c)))
-  ;; Slide 2
-  (define f2 (frame-push (handle 0) (d:variable 'y) (d:number 1)))
-  (check-equal? f2 (frame (handle 0) (hash (d:variable 'y) (d:number 1))))
-  (check-equal? (d:number 1) (frame-get f2 (d:variable 'y)))
-  (check-equal? #f (frame-get f2 (d:variable 'a)))
-  ;; We can use frame-parse to build frames
-  (check-equal? (parse-frame '[ (a . 10) (b . (closure E0 (lambda (y) a)))]) f1)
-  (check-equal? (parse-frame '[ E0 (y . 1) ]) f2))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Environment
-(provide
-  root-environ
-  environ-push
-  environ-put
-  mem?
-  environ-get
-  d:eval-eff?
-  root-mem
-  parse-mem
-  quote-mem)
-
-;; The root environment is initialized with a single frame
-(define mem? (nonempty-heapof? frame?))
-(define root-alloc (heap-alloc empty-heap root-frame))
-(define/contract root-environ handle? (eff-result root-alloc))
-(define/contract root-mem mem? (eff-state root-alloc))
-
-(define d:eval-eff? (effof? mem? d:value?))
-
-;; The put operation
-(define/contract (environ-put mem env var val)
-  (-> mem? handle? d:variable? d:value? heap?)
-  (define new-frm (frame-put (heap-get mem env) var val))
-  (heap-put mem env new-frm))
-;; The push operation
-(define/contract (environ-push mem env var val)
-  (-> mem? handle? d:variable? d:value? eff?)
-  (define new-frame (frame env (hash var val)))
-  (heap-alloc mem new-frame))
-;; The Get operation
-(define/contract (environ-get mem env var)
-  (-> mem? handle? d:variable? d:value?)
-  (define (environ-get-aux env)
-    (define frm (heap-get mem env))    ;; Load the current frame
-    (define parent (frame-parent frm))  ;; Load the parent
-    (define result (frame-get frm var)) ;; Lookup locally
-    (cond
-      [result result] ;; Result is defined, then return it
-      [parent (environ-get-aux parent)] ; If parent exists, recurse
-      [else #f]))
-  (define res (environ-get-aux env))
-  ; Slight change from the slides for better error reporting
-  (when (not res)
-    (error
-      (format "Variable ~a was NOT found in environment ~a. Memory dump:\n~a"
-        (d:quote1 var)
-        (quote-handle env)
-        (quote-mem mem))))
-  res)
-
-(define/contract (parse-mem node)
-  (-> any/c heap?)
-  (heap (parse-hash node parse-handle parse-frame)))
-
-(define (quote-mem mem)
-  (-> heap? list?)
-  (quote-hash (heap-data mem) quote-handle quote-frame symbol<?))
-
-(module+ test
-  (define (check-parses-mem? mem)
-    (check-equal? (quote-mem (parse-mem mem)) mem))
-  (check-parses-mem? '([E0 . ([x . 3] [y . 2])]))
-  (define E0 root-environ)
-  (define m1
-    (environ-put
-      (environ-put root-mem E0 (d:variable 'x) (d:number 3))
-      E0 (d:variable 'y) (d:number 5)))
-  (define e1-m2 (environ-push m1 E0 (d:variable 'z) (d:number 6)))
-  (define E1 (eff-result e1-m2))
-  (define m2 (eff-state e1-m2))
-  (define m3 (environ-put m2 E1 (d:variable 'x) (d:number 7)))
-  (define e2-m4 (environ-push m3 E0 (d:variable 'm) (d:number 1)))
-  (define E2 (eff-result e2-m4))
-  (define m4 (eff-state e2-m4))
-  (define m5 (environ-put m4 E2 (d:variable 'y) (d:number 2)))
-
-  (define parsed-m5
-    (parse-mem
-      '([E0 . ([x . 3] [y . 5])]
-        [E1 . (E0 [x . 7] [z . 6])]
-        [E2 . (E0 [m . 1] [y . 2])])))
-  (check-equal? parsed-m5 m5)
-  (check-equal? (environ-get m5 E0 (d:variable 'x)) (d:number 3))
-  (check-equal? (environ-get m5 E0 (d:variable 'y)) (d:number 5))
-  (check-equal? (environ-get m5 E1 (d:variable 'x)) (d:number 7))
-  (check-equal? (environ-get m5 E1 (d:variable 'z)) (d:number 6))
-  (check-equal? (environ-get m5 E1 (d:variable 'y)) (d:number 5))
-  (check-equal? (environ-get m5 E2 (d:variable 'y)) (d:number 2))
-  (check-equal? (environ-get m5 E2 (d:variable 'm)) (d:number 1))
-  (check-equal? (environ-get m5 E2 (d:variable 'x)) (d:number 3))
-  (define m6 (parse-mem '((E0 . [(a . 10) (x . 0)]) (E1 . [E0 (b . 20) (x . 1)]) (E2 . [E0 (a . 30)]) (E3 . [E2 (z . 3)]))))
-  (check-equal? (environ-get m6 E1 (d:variable 'b)) (d:number 20))
+(define-check (eval-exp? exp expected)
+  (define mem (heap-put root-mem root-environ root-frame))
   (check-equal?
-    (heap-filter (lambda (r frm) (even? (handle-id r))) m6)
-    (parse-mem '((E0 (a . 10) (x . 0)) (E2 E0 (a . 30))))))
+    (d:quote1
+      (eff-result (eff-run (d:eval-exp root-environ (d:parse1 exp)) mem)))
+    expected))
 
+(define-check (eval-term? term expected)
+  (define mem (heap-put root-mem root-environ root-frame))
+  (check-equal?
+    (d:quote1
+      (eff-result (eff-run (d:eval-term root-environ (d:parse term)) mem)))
+    expected))
+
+(define-check (curry-exp? given expected)
+  (check-equal? (d:quote1 (d:curry (d:parse1 given))) expected))
+
+(define-check (curry-term? given expected)
+  (check-equal? (d:quote (d:curry (d:parse given))) expected))
+
+(define-check (break-lambda? params given expected)
+  (check-equal? (d:quote1 (break-lambda (map d:variable params) (d:parse given))) expected))
+
+(define-check (break-apply? given expected)
+  (check-equal?
+    (d:quote1
+      (break-apply
+        (d:parse1 (first given))
+        (map d:parse1 (rest given))))
+    expected))
+
+;; End of testing API
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(provide
-  (struct-out eff-op)
-  eff-bind
-  eff-pure
-  eff-run
-  bind
-  do
-  maybe-bind
-  maybe-pure
-  list-bind
-  list-pure
-  (struct-out maybe)
-  (struct-out some)
-  (struct-out none))
 
-(struct eff-op (func))
+; Tests if a given expression evaluates down to the given value
 
-(define/contract (eff-run op h)
-  (-> eff-op? any/c eff?)
-  ((eff-op-func op) h))
+;; Exercise 1 (env-get,env-put,env-push)
 
-(define (eff-bind o1 o2)
-  (eff-op
-    (lambda (h1)
-      (define h2+r (eff-run o1 h1))
-      (define r (eff-result h2+r))
-      (define h2 (eff-state h2+r))
-      (eff-run (o2 r) h2))))
+(check-eff-run?
+  (parse-mem '[(E0 . [])])
+  (env-put (handle 0) (d:variable 'x) (d:number 1))
+  '(void)
+  '[(E0 . [(x . 1)])])
 
-(define (eff-pure x)
-  (eff-op (lambda (h) (eff h x))))
+(check-eff-run?
+  (parse-mem '[(E0 . [( x . 10)])])
+  (env-get (handle 0) (d:variable 'x))
+  10
+  '[(E0 . [( x . 10)])])
+
+(check-eff-run?
+  (parse-mem '[(E0 . [( x . 10)])])
+  (env-push (handle 0) (d:variable 'y) (d:number 99))
+  'E1
+  '[(E0 . [( x . 10)])
+    (E1 . [E0 (y . 99)])]
+  #t)
+
+;; Exercise 1 (expressions)
+
+(eval-exp? '((lambda (x) x) 3)  3)
+(eval-exp? '((((lambda (x) (lambda (y) (lambda (z) x))) 1) 2) 3) 1)
+
+(eval-exp*?
+  ; Input memory
+  '[(E0 . [(x . 1)])]
+  ; Environment
+  'E0
+  ; Input expression
+  'x
+  ; Output value
+  1
+  ; Output memory
+  '[(E0 . [(x . 1)])])
+
+(eval-exp*?
+  ; Input memory
+  '[(E0 . [(x . 2)])]
+  ; Environment
+  'E0
+  ; Input expression
+  20
+  ; Output value
+  20
+  ; Output memory
+  '[(E0 . [(x . 2)])])
+
+(eval-exp*?
+  ; Input memory
+  '[(E0 . [(x . 2)])]
+  ; Environment
+  'E0
+  ; Input expression
+  '(lambda (x) x)
+  ; Output value
+  '(closure E0 (lambda (x) x))
+  ; Output memory
+  '[(E0 . [(x . 2)])])
+
+;; Exercise 1 (terms)
+
+; Tests if a given program evaluates down to a given value
+(eval-term?
+  '[
+    (define b (lambda (x) a))
+    (define a 20)
+    (b 1)]
+  20)
+
+(eval-term?
+  '[
+    (define a 20)
+    (define b (lambda (x) a))
+    (b 1)]
+  20)
+
+(eval-term*?
+  ; Input memory
+  '[(E0 (x . 10)) (E1 E0) (E2 E1) (E3 E2)]
+  ; Environment
+  'E0
+  ; Input term
+  '[((closure E3 (lambda (z) x)) 3)]
+  ; Output value
+  10
+  ; Output memory
+  '[(E0 (x . 10)) (E1 E0) (E2 E1) (E3 E2) (E4 E3 (z . 3))])
+
+(eval-term*?
+  ; Input memory
+  '[(E0 . [(x . 2)])]
+  ; Environment
+  'E0
+  ; Input term
+  '[(define y 20)]
+  ; Output value
+  '(void)
+  ; Output memory
+  '[(E0 . [(x . 2) (y . 20)])])
+
+(eval-term*?
+  ; Input memory
+  '[(E0 . [])]
+  ; Environment
+  'E0
+  ; Input term
+  '[(define x 2) (define y 20) x]
+  ; Output value
+  2
+  ; Output memory
+  '[(E0 . [(x . 2) (y . 20)])])
+
+;; Exercise 2
+(break-lambda? '(x y z) '[0]
+  '(lambda (x) (lambda (y) (lambda (z) 0))))
+(break-lambda? '() '[0]
+  '(lambda (_) 0))
+
+;; Exercise 3
+(break-apply? '(x y z) '((x y) z))
+(break-apply? '(f) '(f (void)))
+
+;; Exercise 4
+(curry-exp? '(foo) '(foo (void)))
+(curry-exp? '(foo 1 2 3) '(((foo 1) 2) 3))
+(curry-exp? '(if #t 1 2) '(((if #t) 1) 2))
+(curry-exp? '(lambda (x y z) x) '(lambda (x) (lambda (y) (lambda (z) x))))
+(curry-exp? '(lambda () x) '(lambda (_) x))
 
 
-(struct maybe ())
-(struct some (data) #:super struct:maybe #:transparent)
-(struct none () #:super struct:maybe #:transparent)
+;; Exercise 5
+(eval-exp? '(((if #t) 1) 2) 1)
+(eval-exp? '(((if #f) 1) 2) 2)
 
-(define/contract (maybe-bind res kont)
-  (-> maybe? (-> any/c any/c) any/c)
-  (cond
-    [(none? res) res]
-    [else (kont (some-data res))]))
+;; Extra credit: Exercise 6
+(eval-exp? '((+ 1) 2) 3)
+(eval-exp? '((* 3) 2) 6)
 
-(define/contract (maybe-pure x)
-  (-> any/c maybe?)
-  (some x))
 
-(define (bind o1 o2)
-  (cond
-    [(maybe? o1) (maybe-bind o1 o2)]
-    [(eff-op? o1) (eff-bind o1 o2)]
-    [(list? o1) (list-bind o1 o2)]))
+#|
 
-(define (list-pure x) (list x))
-(define (list-bind op1 op2)
-  (join (map op2 op1)))
-(define (join elems)
-  (foldr append empty elems))
+Church-Encoding
 
-(define-syntax do
-  (syntax-rules (<-)
-    ; Only one monadic-op, return it
-    [(_ mexp) mexp]
-    ; A binding operation
-    [(_ var <- mexp rest ...) (bind mexp (lambda (var) (do rest ...)))]
-    ; No binding operator, just ignore the return value
-    [(_ mexp rest ...)        (bind mexp (lambda (_) (do rest ...)))]))
+|#
 
-(module+ test
-  (require rackunit)
-  (define lst
-    (do
-      x <- (list 1 2)
-      y <- (list 3 4)
-      (list-pure (cons x y))))
-  ; Result
-  (check-equal? lst (list (cons 1 3) (cons 1 4) (cons 2 3) (cons 2 4)))
-  (check-equal? (join (list (list 1 2)))
-    (list 1 2))
-  (check-equal? (join (list (list 1) (list 2)))
-    (list 1 2))
-  (check-equal? (join (list (list 1 2) (list 3)))
-    (list 1 2 3)))
+(define ID '(lambda (x) x))
+(define FST '(lambda (x) (lambda (y) x)))
+(define SND '(lambda (x) (lambda (y) y)))
+(define K '(lambda (x) (lambda (y) x)))
+(define APPLY '(lambda (f) (lambda (x) (f x))))
+(define TWICE '(lambda (f) (lambda (x) (f (f x)))))
+(define THRICE '(lambda (f) (lambda (x) (f (f (f x))))))
+(define COMP '(lambda (g) (lambda (f) (lambda (x) (g (f x))))))
+(define SA '(lambda (x) (x x)))
+(define (apply-n f n)
+  (define (on-elem n x)
+    `(,f ,x))
+  (foldl on-elem 'x (range n)))
+(define (church-num n)
+  (define body (apply-n 'f n))
+  `(lambda (f) (lambda (x) ,body)))
+(define ZERO '(lambda (f) (lambda (x) x)))
+(define ONE '(lambda (f) (lambda (x) (f x))))
+(define TWO '(lambda (f) (lambda (x) (f (f x)))))
+(define TEN (church-num 10))
+(define SUCC '(lambda (n) (lambda (f) (lambda (x) (f ((n f) x))))))
+; True
+(define TRUE '(lambda (a) (lambda (b) a)))
+; False
+(define FALSE '(lambda (a) (lambda (b) b)))
+(define (OR a b)
+  (list (list a TRUE) b))
+(define (AND a b)
+  (list (list a b) FALSE))
+(define (NOT a)
+  (list (list a FALSE) TRUE))
+(define (EQ a b)
+  (list (list a b) (NOT b)))
+(define (IMPL a b)
+  (OR (NOT a) b))
+
+(eval-exp? `((,TEN ,ID) 3) 3)
+
+(define
+  prog
+  `[
+    (define (true x) (lambda (y) x))
+    (define (false x) (lambda (y) y))
+    (define (retfalse y) false)
+    (define (zero? z) ((z retfalse) true))
+    (define (id x) x)
+    (define (pred n)
+      (lambda (f)
+        (define (f1 g) (lambda (h) (h (g f))))
+        (lambda (x)
+          (define (f2 u) x)
+          (((n f1) f2) id))))
+    (define (- m)
+      (lambda (n)
+        ((n pred) m)))
+    (define (<= m)
+      (lambda (n)
+        (zero? ((- m) n))))
+    (define (bool b)
+      ((b #t) #f))
+    (bool ((<= ,TWO) ,TEN))])
+
+(eval-term? prog #t)
+
+(curry-term?
+  `[
+    (define (true x y) x)
+    (define (false x y) y)
+    (define (retfalse y) false)
+    (define (zero? z) (z retfalse true))
+    (define (id x) x)
+    (define (pred n f)
+      (define (f1 g h) (h (g f)))
+      (lambda (x)
+        (define (f2 u) x)
+        (n f1 f2 id)))
+    (define (- m n) (n pred m))
+    (define (<= m n) (zero? (- m n)))
+    (define (bool b) (b #t #f))
+    (bool (<= ,TWO ,TEN))]
+  prog)
