@@ -79,9 +79,8 @@
     (_ ((d:eval-exp-impl) env term)))
     )
 
-;; Use this dynamic parameter in d:eval-term for improved testing (see Lecture 31)
+
 (define d:eval-exp-impl (make-parameter d:eval-exp))
-;; Use this dynamic parameter in d:eval-exp for improved testing (see Lecture 31)
 (define d:eval-term-impl (make-parameter d:eval-term))
 
 ;; Parameter body *must* be a curried term already
@@ -108,9 +107,7 @@
         )
   ))
 
-;; Use this dynamic parameter in d:curry for improved testing (see Lecture 31)
 (define break-lambda-impl (make-parameter break-lambda))
-;; Use this dynamic parameter in d:curry for improved testing (see Lecture 31)
 (define break-apply-impl (make-parameter break-apply))
 
 (define/contract (d:curry term)
