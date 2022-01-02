@@ -1,6 +1,6 @@
 #lang errortrace racket
 
-(require "interpreter-utility.rkt")
+(require "mist-interpreter-utility.rkt")
 (provide (all-defined-out))
 
 (define/contract (env-put env var val)
